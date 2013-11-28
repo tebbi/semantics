@@ -26,3 +26,6 @@ Tactic Notation "in_all" tactic(T) :=
   repeat match goal with [H : _ |- _] =>
                   first[T H; try revert H | revert H]
   end; intros.
+
+Lemma conj' (A B : Prop) : A -> (A -> B) -> A /\ B. 
+Proof. tauto. Qed.

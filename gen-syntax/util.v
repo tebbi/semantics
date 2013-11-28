@@ -299,7 +299,7 @@ Ltac oaind :=
     | x : _ |- _ => idtac ">>> induction on" x "<<<"; autorevert x; induction x; intros => //=; arew
   end; arew.
 
-Ltac inv H := (nointr inversion H) => * ; subst; 
+Ltac inv H := inversion H; subst; 
               try match goal with [H1 : ?s = _, H2 : ?s = _ |- _] => rewrite H1 in H2; inv H2 end.
 
 Lemma nth_cat1 {A n} {l1 l2 : seq A} {x}: n < size l1 -> nth x (l1 ++ l2) n = nth x l1 n.

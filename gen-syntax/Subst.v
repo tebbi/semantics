@@ -1,4 +1,4 @@
-Require Import lib.
+Require Import lib Size Omega List ssreflect ssrfun util.
 
 Delimit Scope subst_scope with subst.
 Open Scope subst_scope.
@@ -9,7 +9,13 @@ Definition var := nat.
 Definition scons {X : Type} s sigma x : X := match x with S x' => sigma x' | _ => s end.
 Infix ".:" := scons (at level 60, right associativity) : subst_scope.
 
-Definition upr xi := 0 .: (fun x => S(xi x)).
+Definition lift (x y : var) : var := plus x y.
+
+Arguments lift !x !y.
+
+Notation "( + x )" := (lift x) (format "( + x )").
+
+Definition upr xi := 0 .: (fun x => (+1) (xi x)).
 
 Class Subst (term : Type) := {
   Var : var -> term;
@@ -17,34 +23,36 @@ Class Subst (term : Type) := {
   subst : (var -> term) -> term -> term
 }.
 
-Class SubstLemmas {term : Type} (subst_funs : Subst term) := {
-  rename_subst xi : rename xi = subst (fun x => Var (xi x));
-  subst_id s : subst Var s = s;
-  id_subst x sigma : subst sigma (Var x) = sigma x;
-  subst_comp s sigma tau : subst tau (subst sigma s) = subst (fun x => subst tau (sigma x)) s
-}.
+Definition rcomp (xi zeta : var -> var) := zeta \o xi. 
+Arguments rcomp xi zeta x /.
 
-Notation "sigma >> tau" := (fun x => subst tau (sigma x)) (at level 55, right associativity) : subst_scope.
-Notation "s .[ sigma ]" := (subst sigma s) (at level 2, sigma at level 99, left associativity, format "s .[ sigma ]" ) : subst_scope.
-Notation " l ,, x" := (cons x l) (at level 50) : subst_scope.
+Notation "xi >>> zeta" := (rcomp xi zeta) (at level 55, left associativity) : subst_scope.
+Notation "sigma >> tau" := (subst tau \o sigma) (at level 55, left associativity) : subst_scope.
+Notation "s .[ sigma ]" := (subst sigma s) (at level 2, sigma at level 200, left associativity, format "s .[ sigma ]" ) : subst_scope.
+Notation " l ,, x" := (cons x l) (at level 4, left associativity, format "l ,, x") : subst_scope.
+Notation " l1 ,,, l2" := (l2 ++ l1) (at level 4, left associativity, format "l1 ,,, l2") : subst_scope.
 
 
 Notation beta s := (s .: Var) (only parsing).
-Notation ren xi := (fun x => Var (xi x)).
 
-Definition lift x y := plus x y.
+Definition ren {term : Type}{subst_funs : Subst term} xi (x : var) := Var (xi x).
+Arguments ren {_ _} xi x/.
+Notation up sigma := ((Var 0) .: sigma >> ren(+1)).
 
-Arguments lift x y /.
 
-Notation "( + x )" := (lift x) (format "( + x )").
+Class SubstLemmas (term : Type) (subst_funs : Subst term) := {
+  rename_subst xi : rename xi = subst (ren xi);
+  subst_id s : subst Var s = s;
+  id_subst x sigma : subst sigma (Var x) = sigma x;
+  subst_comp s sigma tau : subst tau (subst sigma s) = subst (sigma >> tau) s
+}.
+
 
 Section Subst.
 
 Context {term : Type}.
 Context {subst_funs : Subst term}.
-Context {subst_lemmas : SubstLemmas subst_funs}.
-
-Notation up sigma := ((Var 0) .: sigma >> ren(+1)).
+Context {subst_lemmas : SubstLemmas _ subst_funs}.
 
 Ltac ssimpl := 
   simpl; 
@@ -91,7 +99,13 @@ Proof.
   f_ext. intros x. now destruct x.
 Qed.
 
-Lemma scons_lift s sigma : ren(+1) >> (s .: sigma) = sigma.
+Lemma scons_lift (x : var) : x .: lift (S x) = lift x.
+Proof.
+  unfold var in *.
+  f_ext; intro y; destruct y; unfold lift; simpl; omega.
+Qed.
+
+Lemma lift_scons_comp s sigma : ren(+1) >> (s .: sigma) = sigma.
 Proof.
   f_ext. intros. destruct x; now ssimpl.
 Qed.
@@ -101,24 +115,40 @@ Proof.
   f_ext. intros y. now destruct y.
 Qed.
 
+Lemma lift_comp n m: (+n) >>> (+m) = (+(n+m)).
+Proof.
+  unfold lift. f_ext. intro. simpl. unfold var in *. omega.
+Qed.
+
+Lemma ren_comp xi zeta : ren xi >> ren zeta = ren (xi >>> zeta).
+Proof.
+  f_ext. intro. now ssimpl.
+Qed.
+
 Lemma fold_ren (xi zeta : var -> var) : (fun x => Var (xi (zeta x))) = ren (fun x => xi (zeta x)). reflexivity. Qed.
 
+Lemma ren_uncomp A xi zeta : A.[ren (xi >>> zeta)] = A.[ren xi].[ren zeta].
+Proof.
+  ssimpl. f_equal. f_ext. intro. ssimpl. reflexivity.
+Qed.
+
+(*
 Fixpoint interp_ctxt Gamma A :=
   match Gamma with 
     | nil => A
     | Gamma,, B => A.[interp_ctxt Gamma B .: (fun x => interp_ctxt Gamma (Var x))]
   end.
-
+*)
 End Subst.
 
 Hint Rewrite 
      @rename_subst @subst_id @id_subst @subst_comp @to_lift @Var_comp_l @Var_comp_r 
-     @zero_scons @comp_assoc @comp_dist @scons_lift @scons_Var_ren @fold_ren : subst.
+     @zero_scons @comp_assoc @comp_dist @scons_lift @lift_scons_comp @scons_Var_ren @lift_comp @ren_comp @fold_ren 
+NPeano.Nat.add_1_r : subst.
 
 
 Arguments rename {_ _}  xi s : simpl never.
 Arguments subst {_ _} sigma s : simpl never.
-
 
 Notation "'up' sigma" := ((Var 0) .: sigma >> ren(+1)) (at level 1) : subst_scope.
 
@@ -207,7 +237,7 @@ Ltac has_var s :=
 
 
 Notation "'_up_' ( rename , Var , sigma )" := 
-  ((Var 0) .: (fun x => rename S (sigma x))) (only parsing).
+  ((Var 0) .: (fun x => rename (+1) (sigma x))) (only parsing).
 
 Ltac gen_subst Var rename :=
 fix subst 2; intros sigma s;
@@ -250,7 +280,7 @@ match goal with [ |- @SubstLemmas ?term ?subst_funs] =>
 let rename := constr:(@rename term subst_funs) in
 let subst := constr:(@subst term subst_funs) in
 let Var := constr:(@Var term subst_funs) in
-assert(rename_subst : forall xi : var -> var, rename xi = subst (fun x : var => Var (xi x)));[
+assert(rename_subst : forall xi : var -> var, rename xi = subst (ren xi));[
 let xi := fresh "xi" in intros xi; 
 f_ext; 
 let s := fresh "s" in intros s; 
@@ -269,7 +299,7 @@ f_equal; solve[ f_ext; intros [|]; reflexivity | assumption]
 
 assert(id_subst : forall (x : var) (sigma : var -> term), subst sigma (Var x) = sigma x);
 [intros; reflexivity | idtac];
-assert(rename_subst_comp : forall s sigma xi, (rename xi s).[sigma] = s.[(fun x => sigma (xi x))]);[
+assert(rename_subst_comp : forall s sigma xi, (rename xi s).[sigma] = s.[ren xi >> sigma]);[
 let s := fresh "s" in intros s; induction s; 
 intros; ssimpl'; f_equal; eauto; ssimpl'; 
 autorew; f_equal; f_ext; intros [|]; reflexivity
@@ -280,13 +310,13 @@ intros; rewrite rename_subst;
 rewrite rename_subst_comp; now rewrite rename_subst
 | idtac];
 
-assert(up_rename_comm: forall sigma xi, up (sigma >> (fun x => Var(xi x))) = up sigma >> (fun x => Var (upr xi x)));[
+assert(up_rename_comm: forall sigma xi, up (sigma >> (ren xi)) = up sigma >> (ren (upr xi)));[
 intros; f_ext; intros [|]; ssimpl'; trivial; 
 intros; repeat rewrite <- rename_subst; now repeat rewrite rename_comp
 | idtac];
 
-assert(subst_rename_comp : forall s sigma xi, rename xi s.[sigma] = s.[sigma >> (fun x => Var(xi x))]);[
-let s := fresh "s" in intros s; induction s;
+assert(subst_rename_comp : forall s sigma xi, rename xi s.[sigma] = s.[sigma >> (ren xi)]);[
+let s := fresh "s" in intros s; induction s; unfold funcomp in *;
 solve[ 
 match goal with [x : var |- _ ] => destruct x; ssimpl'; intros; now rewrite rename_subst end |
 intros; ssimpl'; f_equal; now autorew]

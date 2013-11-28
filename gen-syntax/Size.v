@@ -1,91 +1,4 @@
 Require Import lib.
-(*
-Delimit Scope pnat_scope with pnat.
-Open Scope pnat_scope.
-
-Unset Elimination Schemes.
-Inductive pnat : Prop := O' | S' (pred : pnat).
-Lemma pnat_ind : forall P : pnat -> Prop,
-       P O' -> (forall n, P n -> P (S' n)) -> forall n, P n.
-fix pnat_ind' 4.
-intros. destruct n.
-- apply H.
-- apply H0. apply pnat_ind'; assumption.
-Qed.
-Set Elimination Schemes.
-
-Fixpoint pplus n m := 
-  match n with
-    | O' => m
-    | S' n' => S'(pplus n' m)
-  end.
-
-Infix "+'" := pplus (at level 50, left associativity) : pnat_scope.
-
-Lemma pplus_assoc n1 n2 n3 : n1 +' (n2 +' n3) = n1 +' n2 +' n3.
-Proof.
-  revert n2 n3.
-  induction n1; simpl; intuition. now f_equal.
-Qed.
-
-
-Lemma pplus_zero_l n : O' +' n = n. 
-Proof. reflexivity. Qed.
-
-Lemma pplus_zero_r n : n +' O' = n. 
-Proof.
-  induction n; simpl; now autorew.
-Qed.
-
-Lemma pplus_succ_l n m : S' n +' m  = S'(n +' m). 
-Proof. reflexivity. Qed.
-
-Lemma pplus_succ_r n m : n +' S' m  = S'(n +' m). 
-Proof.
-  induction n; simpl; now autorew.
-Qed.
-
-Hint Rewrite pplus_assoc pplus_zero_l pplus_zero_r pplus_succ_l pplus_succ_r : pplus.
-
-Lemma pplus_comm n m : n +' m = m +' n.
-Proof.
-  revert m.
-  induction n; intros; simpl; autorewrite with pplus; now autorew.
-Qed.
-
-Definition pleq n m := exists n', m = n +' n'.
-Infix "<='" := pleq(at level 70, no associativity) : pnat_scope.
-
-Lemma pleq_S n m : n <=' m -> S' n <=' S' m.
-Proof.
-  intros. destruct H. eexists. simpl. f_equal. eassumption.
-Qed.
-
-Lemma pleq_S_r n m : n <=' m -> n <=' S' m.
-Proof.
-  intros. destruct H. exists (S' x). autorewrite with pplus. f_equal. eassumption.
-Qed.
-
-Lemma pleq_zero n : O' <=' n.
-Proof.
-  eexists. reflexivity.
-Qed.
-
-Lemma pleq_plus n1 n2 m : n1 <=' n2 -> n1 +' m <=' n2 +' m.
-Proof.
-  intros H. destruct H as [x H]. exists x. 
-  rewrite H.
-  repeat rewrite <- pplus_assoc.
-  now rewrite (@pplus_comm m x).
-Qed.
-
-
-Lemma pleq_plus_r n m : n <=' m +' n.
-Proof.
-  eexists.
-  now rewrite pplus_comm.
-Qed.
-*)
 
 Class Size (A : Type) := size : A -> nat.
 
@@ -116,7 +29,7 @@ end.
 
 Require Import Omega.
 
-Lemma size_rec {A : Type} {size_A : Size A} f (x : A) : forall P : A -> Type, (forall x, (forall y, f y < f x -> P y) -> P x) -> P x.
+Lemma size_rec {A : Type} f (x : A) : forall P : A -> Type, (forall x, (forall y, f y < f x -> P y) -> P x) -> P x.
 Proof.
   intros P IS. cut (forall n x, f x <= n -> P x). { eauto. } 
   intros n. induction n; intros; apply IS; intros. 
@@ -125,22 +38,29 @@ Proof.
 Defined.
 
 
-Tactic Notation "sinduction" ident(H) "using" constr(f) :=
-autorevert H; induction H using (size_rec f); destruct H.
+Tactic Notation "sinduction" ident(H) "using" open_constr(f) :=
+let T := typeof H in
+autorevert H; induction H using (@size_rec _ f);
+match goal with [H : T |- _] => destruct H end.
 
-Tactic Notation "sinduction" ident(H) := sinduction H using size.
-
-Ltac somega := repeat(unfold size in *; simpl in *); omega.
+Ltac sind H := 
+let IH := fresh "IH" in
+let x := fresh "x" in
+induction H as [x IH] using (@size_rec _ size); try rename x into H.
 
 Instance def_size (A : Type) : Size A | 100 := (fun x => O).
 
 Instance size_list (A : Type) (size_A : Size A) : Size (list A). gen_Size. Show Proof. Defined.
 
-Instance size_nat : Size nat. gen_Size. Show Proof. Defined.
+Instance size_nat : Size nat := id.
 
 Inductive foo := Foo1 | Foo2 (_ : list foo) (_ : nat).
 
 Instance size_foo : Size foo. gen_Size. Set Printing Implicit. Show Proof. Defined.
+
+Ltac sizesimpl := repeat(unfold size in *; unfold def_size in *; simpl in *).
+
+Tactic Notation "somega" := sizesimpl; omega.
 
 (*
 Ltac elim_term :=
