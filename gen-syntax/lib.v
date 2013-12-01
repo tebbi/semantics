@@ -1,6 +1,10 @@
+Definition bind {X : Type} (T : X) := T.
+Definition var := nat.
+
 Ltac autorew := repeat match goal with [H : _ |- _] => rewrite H end.
 
 Ltac typeof s := let T := type of s in T.
+Notation nosimpl t := (let tt := tt in t).
 
 Require Import FunctionalExtensionality.
 Ltac f_ext := apply functional_extensionality.

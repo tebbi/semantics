@@ -1,10 +1,7 @@
-Require Import lib Size Omega List ssreflect ssrfun util.
+Require Import lib Size Omega List ssreflect ssrfun util MMap.
 
 Delimit Scope subst_scope with subst.
 Open Scope subst_scope.
-
-Definition bind {X : Type} (T : X) := T.
-Definition var := nat.
 
 Definition scons {X : Type} s sigma x : X := match x with S x' => sigma x' | _ => s end.
 Infix ".:" := scons (at level 60, right associativity) : subst_scope.
@@ -28,7 +25,9 @@ Arguments rcomp xi zeta x /.
 
 Notation "xi >>> zeta" := (rcomp xi zeta) (at level 55, left associativity) : subst_scope.
 Notation "sigma >> tau" := (subst tau \o sigma) (at level 55, left associativity) : subst_scope.
+(*Notation "sigma >>' tau" := (mmap(subst tau) \o sigma) (at level 55, left associativity) : subst_scope.*)
 Notation "s .[ sigma ]" := (subst sigma s) (at level 2, sigma at level 200, left associativity, format "s .[ sigma ]" ) : subst_scope.
+(*Notation "s ..[ sigma ]" := (mmap (subst sigma) s) (at level 2, sigma at level 200, left associativity, format "s ..[ sigma ]" ) : subst_scope.*)
 Notation " l ,, x" := (cons x l) (at level 4, left associativity, format "l ,, x") : subst_scope.
 Notation " l1 ,,, l2" := (l2 ++ l1) (at level 4, left associativity, format "l1 ,,, l2") : subst_scope.
 
@@ -55,7 +54,7 @@ Context {subst_funs : Subst term}.
 Context {subst_lemmas : SubstLemmas _ subst_funs}.
 
 Ltac ssimpl := 
-  simpl; 
+  msimpl; 
   repeat match goal with 
              [|- context[?s]] => 
              first[
@@ -127,9 +126,14 @@ Qed.
 
 Lemma fold_ren (xi zeta : var -> var) : (fun x => Var (xi (zeta x))) = ren (fun x => xi (zeta x)). reflexivity. Qed.
 
+Lemma subst_comp' sigma tau : subst sigma \o subst tau = subst (tau >> sigma).
+Proof.
+  f_ext. intro. now ssimpl.
+Qed.
+
 Lemma ren_uncomp A xi zeta : A.[ren (xi >>> zeta)] = A.[ren xi].[ren zeta].
 Proof.
-  ssimpl. f_equal. f_ext. intro. ssimpl. reflexivity.
+  ssimpl. now rewrite ren_comp.
 Qed.
 
 (*
@@ -143,7 +147,7 @@ End Subst.
 
 Hint Rewrite 
      @rename_subst @subst_id @id_subst @subst_comp @to_lift @Var_comp_l @Var_comp_r 
-     @zero_scons @comp_assoc @comp_dist @scons_lift @lift_scons_comp @scons_Var_ren @lift_comp @ren_comp @fold_ren 
+     @zero_scons @comp_assoc @comp_dist @scons_lift @lift_scons_comp @scons_Var_ren @lift_comp @ren_comp @fold_ren @subst_comp'
 NPeano.Nat.add_1_r : subst.
 
 
@@ -157,12 +161,21 @@ Ltac ssimpl' :=
   try unfold subst;
   simpl; 
   repeat match goal with 
-             [|- context[?s]] => 
-             first[
-                 progress change s with Var
-               | progress change s with rename
-               | progress change s with subst
-               ] 
+             [|- context[?s]] =>
+             let T := typeof s in
+             match T with
+               | (var -> _) -> ?term -> ?term =>
+                 let inst := fresh "inst" in
+                 (* assert(inst : Subst term);[
+                     now eauto with typeclass_instances | *)
+                     first[
+                         progress cutrewrite (s = subst);[idtac|reflexivity] | 
+                         progress cutrewrite (s = rename);[idtac|reflexivity] ]
+               | (var -> ?term) =>
+                 (*assert(Subst term);[
+                     now eauto with typeclass_instances | *)
+                         progress cutrewrite (s = Var);[idtac|reflexivity]
+             end
          end
 .
 
@@ -184,15 +197,17 @@ Ltac ssimpl'H H :=
 
 Ltac ssimpl := 
   repeat(
+     msimpl;
      ssimpl';
-      autorewrite with subst; [idtac | now eauto with typeclass_instances ..]
-    ).
+     try(autorewrite with subst; [idtac | now eauto with typeclass_instances ..])
+    ); trivial.
 
 Ltac ssimplH H := 
   repeat(
+     msimplH H;
      ssimpl'H H;
       autorewrite with subst in H; [idtac | now eauto with typeclass_instances ..]
-    ).
+    ); trivial.
 
 Tactic Notation "ssimpl" "in" ident(H) := ssimplH H.
 
@@ -237,7 +252,7 @@ Ltac has_var s :=
 
 
 Notation "'_up_' ( rename , Var , sigma )" := 
-  ((Var 0) .: (fun x => rename (+1) (sigma x))) (only parsing).
+  ((Var 0) .: (rename (+1) \o sigma)) (only parsing).
 
 Ltac gen_subst Var rename :=
 fix subst 2; intros sigma s;
@@ -319,7 +334,7 @@ assert(subst_rename_comp : forall s sigma xi, rename xi s.[sigma] = s.[sigma >> 
 let s := fresh "s" in intros s; induction s; unfold funcomp in *;
 solve[ 
 match goal with [x : var |- _ ] => destruct x; ssimpl'; intros; now rewrite rename_subst end |
-intros; ssimpl'; f_equal; now autorew]
+intros; ssimpl'; unfold funcomp; f_equal; now autorew]
 | idtac];
 
 assert(subst_up_S : forall sigma s, rename S s.[sigma] = (rename S s).[up sigma]);[

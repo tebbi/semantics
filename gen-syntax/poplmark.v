@@ -1,15 +1,15 @@
-Require Import Program.Equality ssreflect List.
-Require Import Subst Size util lib Decidable Ctxts.
+Require Import Program.Equality ssreflect ssrfun List.
+Require Import MMap Subst Size util lib Decidable Ctxts.
 
 Inductive type : Type :=
-| TVar (x : var)
+| TyVar (x : var)
 | Top
 | Arr (A1 A2 : type)
 | All (A1 : type) (A2 : bind type).
 
 Instance subst_type : Subst type. gen_Subst. Defined.
 Instance substLemmas_type : SubstLemmas _ subst_type. 
-gen_SubstLemmas. Defined.
+admit;gen_SubstLemmas. Qed.
 Instance size_type : Size type. 
 assert(Size var). exact(fun _ => 0).
 gen_Size. Defined.
@@ -20,23 +20,24 @@ Proof.
 Qed.
 
 Fixpoint wf_ty Delta A := match A with
-  | TVar x => exists B, dep_get Delta x B
+  | TyVar x => exists B, dget Delta x B
   | Top => True
   | Arr A B => wf_ty Delta A /\ wf_ty Delta B
   | All A B => wf_ty Delta A /\ wf_ty Delta,,A B
 end.
 
+Reserved Notation "'SUB' Delta |- A <: B" (at level 68, A at level 99, no associativity).
 Inductive sub (Delta : list type) : type -> type -> Prop :=
-| SA_Top A : wf_ty Delta A -> sub Delta A Top
-| SA_Refl x : wf_ty Delta (TVar x) -> sub Delta (TVar x) (TVar x)
-| SA_Trans x A B : dep_get Delta x A -> sub Delta A B -> sub Delta (Var x) B 
-| SA_Arrow A1 A2 B1 B2 : sub Delta B1 A1 -> sub Delta A2 B2 -> sub Delta (Arr A1 A2) (Arr B1 B2)
-| SA_All A1 A2 B1 B2 : sub Delta B1 A1 -> wf_ty Delta B1 -> sub (Delta,,B1) A2 B2 -> sub Delta (All A1 A2) (All B1 B2)
-.
+| SA_Top A : wf_ty Delta A -> SUB Delta |- A <: Top
+| SA_Refl x : wf_ty Delta (Var x) -> SUB Delta |- Var x <: Var x
+| SA_Trans x A B : dget Delta x A -> SUB Delta |- A <: B -> SUB Delta |- Var x <: B 
+| SA_Arrow A1 A2 B1 B2 : SUB Delta |- B1 <: A1 -> SUB Delta |- A2 <: B2 -> SUB Delta |- Arr A1 A2 <: Arr B1 B2
+| SA_All A1 A2 B1 B2 : SUB Delta |- B1 <: A1 -> wf_ty Delta B1 -> SUB Delta,,B1 |- A2 <: B2 -> SUB Delta |- All A1 A2 <: All B1 B2
+where "'SUB' Delta |- A <: B" := (sub Delta A B).
 
 Lemma wf_weak Delta1 Delta2 A xi : 
   wf_ty Delta1 A -> 
-  (forall x B, dep_get Delta1  x B -> exists B', dep_get Delta2 (xi x) B') -> 
+  (forall x B, dget Delta1  x B -> exists B', dget Delta2 (xi x) B') -> 
   wf_ty Delta2 A.[ren xi].
 Proof.
   intros H. aind A. ssimpl.
@@ -54,20 +55,20 @@ Proof.
   cutrewrite(A = A.[ren id]);[idtac|now ssimpl]. 
   eapply wf_weak; eauto.
   intros.
-  apply dep_get_defined.
+  apply dget_defined.
   cut(id x < length Delta1). omega.
-  apply dep_get_defined.
+  apply dget_defined.
   eexists. eassumption.
 Qed.
 
-Lemma sub_refl Delta A : wf_ty Delta A -> sub Delta A A.
+Lemma sub_refl Delta A : wf_ty Delta A -> SUB Delta |- A <: A.
 Proof.
   revert Delta. induction A; simpl; intuition; eauto using sub.
 Qed.
 
-Lemma sub_weak Delta1 Delta2 A1 A2 xi : sub Delta1 A1 A2 -> 
-  (forall x B, dep_get Delta1 x B -> dep_get Delta2 (xi x) B.[ren xi]) -> 
-  sub Delta2 A1.[ren xi] A2.[ren xi] .
+Lemma sub_weak Delta1 Delta2 A1 A2 xi : SUB Delta1 |- A1 <: A2 -> 
+  (forall x B, dget Delta1 x B -> dget Delta2 (xi x) B.[ren xi]) -> 
+  SUB Delta2 |- A1.[ren xi] <: A2.[ren xi] .
 Proof.
    intros H. aind H.
    - constructor. eapply wf_weak; now eauto.
@@ -78,7 +79,7 @@ Proof.
        destruct x; ssimpl; arew; ssimpl; rewrite (ren_uncomp _ _ (+1)); arew. 
 Qed.
 
-Lemma sub_wf {Delta A B} : sub Delta A B -> wf_ty Delta A /\ wf_ty Delta B.
+Lemma sub_wf {Delta A B} : SUB Delta |- A <: B -> wf_ty Delta A /\ wf_ty Delta B.
 Proof.
   intros H. aind H.
   eapply wf_weak'. eassumption.
@@ -86,9 +87,12 @@ Proof.
 Qed.
 
 Lemma sub_trans' n : 
-  (forall Delta A B C, n = size B -> sub Delta A B -> sub Delta B C -> sub Delta A C) /\
-  (forall Delta' Delta  B B' A C, n = size B -> sub Delta,,B,,,Delta' A C -> sub Delta B' B -> sub Delta,,B',,,Delta' A C)
-.
+  (forall Delta A B C, n = size B ->
+     SUB Delta |- A <: B -> SUB Delta |- B <: C -> SUB Delta |- A <: C) /\
+  (forall Delta' Delta B B' A C, n = size B ->
+     SUB Delta,,B,,,Delta' |- A <: C ->
+     SUB Delta |- B' <: B -> 
+     SUB Delta,,B',,,Delta' |- A <: C).
 Proof.
   induction n as [n IH] using (size_rec (fun x => x)).
   apply conj'.
@@ -97,7 +101,7 @@ Proof.
     revert C H_BC.
     induction H_AB; prepare.
     - now arew.
-    - econstructor; now prepare.
+    - econstructor; now eauto.
     - inv H_BC. 
       + constructor. simpl. intuition. now eapply (sub_wf H_AB1). now eapply (sub_wf H_AB2).
       + constructor; eapply IH; eauto; somega.
@@ -119,23 +123,23 @@ Proof.
       eapply wf_weak'. eassumption.
       repeat rewrite app_length. simpl. omega.
     - constructor. simpl.
-      apply dep_get_defined. apply dep_get_defined in H.
+      apply dget_defined. apply dget_defined in H.
       repeat rewrite -> app_length in *. simpl in *. omega.
     - decide (x = length Delta').
       + subst.
-        econstructor. { apply dep_get_repl. }
-        apply dep_get_steps' with (x := 0) in H.
+        econstructor. { apply dget_repl. }
+        apply dget_steps' with (x := 0) in H.
         destruct H as [? [? H]]. inv H.
         eapply H_trans;[idtac | eapply sub_weak; try eassumption | idtac].
         * now rewrite ren_size_inv.
         * intros. change Delta,,B' with Delta,,,(nil,,B'). rewrite app_assoc.
           cutrewrite (S (length Delta') = length (nil,,B',,,Delta')); 
-            first by apply dep_get_steps.
+            first by apply dget_steps.
           rewrite app_length. simpl. omega.
         * ssimpl in IHsub.
           eapply IHsub; now eauto. 
       + econstructor; eauto.
-        eapply dep_get_repl; now eauto.
+        eapply dget_repl; now eauto.
     - constructor; now eauto.
     - constructor. 
       + now eauto. 
@@ -146,7 +150,116 @@ Proof.
   }
 Qed.
 
-Corollary sub_trans Delta A B C: sub Delta A B -> sub Delta B C -> sub Delta A C.
+Theorem sub_trans Delta A B C: 
+  SUB Delta |- A <: B -> SUB Delta |- B <: C -> SUB Delta |- A <: C.
 Proof.
   intros. eapply sub_trans'; eauto.
+Qed.
+
+
+Inductive term :=
+| TeVar (x : var)
+| Abs (A : type) (s : bind term)
+| App (s t : term)
+| TAbs (A : type) (s : bind term)
+| TApp (s : term) (A : type)
+.
+
+Instance subst_term : Subst term. gen_Subst. Defined.
+Instance substLemmas_term : SubstLemmas _ subst_term. 
+gen_SubstLemmas. Defined.
+Instance size_term : Size term. 
+assert(Size var). exact(fun _ => 0).
+gen_Size. Defined.
+
+Instance mmap_term : MMap type term.
+gen_MMap.
+Defined.
+
+Instance mmapLemmas_term : MMapLemmas mmap_term.
+gen_MMapLemmas.
+Defined.
+
+Inductive value : term -> Prop :=
+| Value_Abs A s : value(Abs A s)
+| Value_TAbs A s : value(TAbs A s).
+
+(*
+Fixpoint wf_term Delta Gamma A := 
+  match A with
+    | TeVar x => exists B, get Gamma x B
+    | Abs A s => wf_ty Delta A /\ wf_term Delta Gamma,,A s
+    | App s t => wf_term Delta Gamma s /\ wf_term Delta Gamma t
+    | TAbs A s => wf_ty Delta A -> wf_term Delta,,A Gamma s
+    | TApp s A => wf_term Delta Gamma s /\ wf_ty Delta A
+  end.
+*)
+
+Reserved Notation "'TY' Delta ; Gamma |- A : B" (at level 68, A at level 99, no associativity, format "'TY'  Delta ; Gamma  |-  A  :  B").
+Inductive ty (Delta Gamma : list type) : term -> type -> Prop :=
+| T_Var A x : 
+    get Gamma x A   -> 
+    TY Delta;Gamma |- Var x : A
+| T_Abs A B s: 
+    TY Delta;Gamma,,A |- s : B   ->   wf_ty Delta A   ->
+    TY Delta;Gamma |- Abs A s : Arr A B
+| T_App A B s t: 
+    TY Delta;Gamma |- s : Arr A B   ->   TY Delta;Gamma |- t : A   -> 
+    TY Delta;Gamma |- App s t : B
+| T_TAbs A B s : 
+    TY Delta,,A;Gamma |- s : B   ->   wf_ty Delta A   ->
+    TY Delta;Gamma |- TAbs A s : All A B
+| T_TApp A B A' s B' : 
+    TY Delta;Gamma |- s : All A B   ->   SUB Delta |- A' <: A   -> B' = B.[A' .: Var] ->
+    TY Delta;Gamma |- TApp s A' : B'
+| T_Sub A B s : 
+    TY Delta;Gamma |- s : A   ->   SUB Delta |- A <: B   ->
+    TY Delta;Gamma |- s : B
+where "'TY' Delta ; Gamma |- s : A" := (ty Delta Gamma s A).
+
+Reserved Notation "'EV' s => t" (at level 68, s at level 80, no associativity, format "'EV'   s  =>  t").
+Inductive eval : term -> term -> Prop :=
+| E_AppAbs A s t : EV  App (Abs A s) t => s.[t .: Var]
+| E_TAppTAbs A s B : EV  TApp (TAbs A s) B => s..[B .: Var]
+| E_AppFun s s' t : 
+    EV  s => s' -> 
+    EV  App s t => App s' t
+| E_AppArg s s' v: 
+    EV  s => s' -> value v ->
+    EV  App v s => App v s'
+| E_TypeFun s s' A :
+    EV  s => s' ->
+    EV  TApp s A => TApp s' A
+where "'EV' s => t" := (eval s t).
+
+
+Lemma ty_weak Delta1 Delta2 Gamma1 Gamma2 s A xi zeta : 
+  TY Delta1;Gamma1 |- s : A -> 
+  (forall x B, dget Delta1 x B -> dget Delta2 (xi x) B.[ren xi]) -> 
+  (forall x B, get Gamma1 x B -> get Gamma2 (zeta x) B.[ren xi]) -> 
+  TY Delta2;Gamma2 |- s.[ren zeta]..[ren xi] : A.[ren xi] .
+Proof.
+   intros H. autorevert H; induction H; intros.
+   - econstructor; now eauto.
+   - ssimpl. econstructor.
+     + apply IHty; eauto. intros [|]; arew.
+     + eapply wf_weak; now eauto.
+   - ssimpl. econstructor; arew.
+   - ssimpl. econstructor.
+     + apply IHty; eauto. intros [|]; arew.
+
+ineconstructor.
+ (econstructor; try now
+   match goal with [H : _ |- _ ] => ssimpl; eapply H; now eauto end). ssimpl. eapply sub_weak; now intuition.
+   
+ ssimpl.   
+   
+ssimpl'. eapply IHty.
+intuition. eauto. ; arew.
+   - constructor. eapply wf_weak; now eauto.
+   - econstructor; ssimpl.
+     + now eauto.
+     + eapply wf_weak; now eauto.
+     + apply IHsub2. intros.
+       destruct x; ssimpl; arew; ssimpl; rewrite (ren_uncomp _ _ (+1)); arew. 
 Qed.
